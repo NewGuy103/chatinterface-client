@@ -1,0 +1,7 @@
+platformdirs
+pyside6
+websockets
+msgpack
+qasync
+httpx
+keyring
