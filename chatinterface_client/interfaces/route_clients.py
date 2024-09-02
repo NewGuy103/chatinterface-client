@@ -140,9 +140,9 @@ class ChatsRouteClient:
         return contacts_set
     
     async def get_messages(
-            self, contact: str, 
-            amount: int, 
-            endpoint: str = '/chats/messages'
+        self, contact: str, 
+        amount: int, 
+        endpoint: str = '/chats/messages'
     ) -> tuple | list[tuple[str, bytes, str]]:
         if not isinstance(contact, str):
             raise TypeError("contact is not a string")
@@ -158,3 +158,13 @@ class ChatsRouteClient:
         )
 
         return messages
+
+    async def check_user_exists(self, username: str, endpoint: str = '/chats/user-exists') -> tuple | bool:
+        if not isinstance(username, str):
+            raise TypeError("username is not a string")
+        
+        url: str = f"{self.host}{endpoint}"
+        params: dict = {'username': username}
+
+        user_exists: tuple | bool = await make_request(self.client, "GET", url, params=params)
+        return user_exists

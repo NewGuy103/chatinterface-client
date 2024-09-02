@@ -3,19 +3,20 @@ import sys
 import asyncio
 
 import uuid
-import keyring
 import httpx
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QMessageBox
+    QApplication, QMainWindow, QMessageBox,
+    QDialog, QWidget
 )
 from qasync import QEventLoop, asyncSlot
 from urllib.parse import urlparse
 
 from .interfaces.route_clients import TokenRouteClient, ChatsRouteClient
 from .interfaces.ws import WSClient
-from .cui import Ui_MainWindow
+from .interfaces.loginstore import KeyringManager
+from .cui import Ui_MainWindow, Ui_ComposeMessageDialog
 
 
 def make_msgbox(text: str, extra_text: str = '', icon: QMessageBox.Icon | None = None) -> None:
@@ -49,28 +50,57 @@ class MainWindow(QMainWindow):
         self.loginPage: LoginPage = LoginPage(self)
 
 
+class ComposeMessageDialog(QDialog):
+    accepted: Signal = Signal(str, str)
+
+    def __init__(
+            self, parent: QWidget | None = None, 
+            f: Qt.WindowType = Qt.WindowType.Dialog
+    ) -> None:
+        super().__init__(parent, f)
+        self.ui: Ui_ComposeMessageDialog = Ui_ComposeMessageDialog()
+
+        self.ui.setupUi(self)
+    
+    def accept(self):
+        name: str = self.ui.nameInput.text()
+        message: str = self.ui.messageInput.toPlainText()
+
+        if not name or not message:
+            make_msgbox(
+                "Missing name or message input",
+                "Enter the required fields and try again",
+                icon=QMessageBox.Icon.Warning
+            )
+            return
+
+        self.accepted.emit(name, message)
+        super().accept()
+
+
 class LoginPage(QObject):
     def __init__(self, parent: MainWindow) -> None:
         super().__init__()
-        self.ui: Ui_MainWindow = parent.ui
 
+        self.ui: Ui_MainWindow = parent.ui
         self.ui.loginPage_loginButton.clicked.connect(self.start_login)
 
-        creds: tuple = self.get_saved_login()
-        if creds:
-            asyncio.ensure_future(self.proceed_to_login(creds[0], creds[1]))
-            return
+        self.keyring_manager: KeyringManager = KeyringManager()
+        asyncio.ensure_future(self.initCore())
 
-    def get_saved_login(self):
-        saved_host: str = keyring.get_password("chatinterface.client.local", 'saved_host')
-        if not saved_host:
-            return
-        
-        saved_token: str = keyring.get_password("chatinterface.client.token", saved_host)
-        if not saved_token:
-            return
+    async def initCore(self):
+        await self.keyring_manager.setup()
+        users: list | str = await self.keyring_manager.show_users()
 
-        return (saved_host, saved_token)
+        if len(users) == 1:
+            first_user: tuple = users[0]
+            token: str = await self.keyring_manager.get_password(first_user[0], first_user[1])
+
+            await self.proceed_to_login(first_user[0], token)
+            return
+        elif len(users) > 1:
+            await self.choose_login(users)
+            return
 
     @asyncSlot()
     async def start_login(self):
@@ -147,8 +177,8 @@ class LoginPage(QObject):
                     )
             return
 
-        keyring.set_password("chatinterface.client.local", 'saved_host', host_without_path)
-        keyring.set_password("chatinterface.client.token", host_without_path, token)
+        await self.keyring_manager.set_password(host_without_path, username, token)
+        await self.proceed_to_login(host, token)
 
     async def proceed_to_login(self, host: str, token: str):
         parsed_host = urlparse(host)
@@ -167,6 +197,55 @@ class LoginPage(QObject):
 
         ws_host: str = f"{ws_scheme}://{parsed_host.netloc}/ws/chat"
         self.dashboardWindow = DashboardPage(host, ws_host, token, self.ui)
+
+    @asyncSlot()
+    async def choose_login(self, users: list[tuple]):
+        saved_logins = self.ui.savedLoginsScrollAreaWidget
+
+        chosen_user: str = ''
+        chosen_host: str = ''
+
+        login_clicked: bool = False
+
+        def set_chosen_user(user: str, host: str):
+            nonlocal chosen_user, chosen_host
+            chosen_user = user
+            chosen_host = host
+
+        def set_login_clicked():
+            nonlocal login_clicked, chosen_user, chosen_host
+            if not chosen_host and not chosen_user:
+                make_msgbox(
+                    "No saved login selected",
+                    "Select a saved login before logging in",
+                    icon=QMessageBox.Icon.Warning
+                )
+                return
+
+            login_clicked = True
+
+        self.ui.mainStackedWidget.setCurrentIndex(1)
+        self.ui.savedLogins_loginButton.clicked.connect(set_login_clicked)
+
+        for user_tuple in users:
+            host: str = user_tuple[0]
+            user: str = user_tuple[1]
+
+            saved_logins.add_user(
+                host, user, 
+                lambda user=user, host=host: set_chosen_user(user, host)
+            )
+
+        while True:  # make this use events next time
+            await asyncio.sleep(0.05)
+            if not chosen_user:
+                continue
+
+            if login_clicked:
+                break
+
+        token: str = await self.keyring_manager.get_password(chosen_host, chosen_user)
+        await self.proceed_to_login(chosen_host, token)
 
 
 class DashboardPage(QObject):
@@ -195,6 +274,10 @@ class DashboardPage(QObject):
 
         self.ui: Ui_MainWindow = ui
         self.callbacks: WebSocketCallbacks = WebSocketCallbacks(self)
+
+        self.dialog_ComposeMessage: ComposeMessageDialog = ComposeMessageDialog(
+            self.ui.chatPage_widget, Qt.WindowType.Dialog
+        )
         # self.dialog_ChatDashboardMenu: Dialog_ChatDashboardMenu = Dialog_ChatDashboardMenu(self)
 
         asyncio.ensure_future(self.initCore())
@@ -212,11 +295,9 @@ class DashboardPage(QObject):
             return
 
         self.ui.chatPage_usernameLabel.setText(self.username)
-        asyncio.ensure_future(self._on_chat_change())
 
     async def initClientList(self):
-        def set_current_chat(username):
-            self.current_chat = username
+        loop = asyncio.get_event_loop()
 
         user_widget = self.ui.usersScrollAreaWidget
         session_info: tuple | dict = await self.token_client.show_token_info(self.__token)
@@ -251,7 +332,7 @@ class DashboardPage(QObject):
                 continue
 
             frame = user_widget.add_user(name)
-            frame.mousePressEvent = lambda _, name=name: set_current_chat(name)
+            frame.clicked.connect(lambda name=name: loop.create_task(self._change_contact(name)))
 
             self.messages[name] = list(reversed(messages))  # most recent will show up first
             complete_fetches.add(name)
@@ -273,31 +354,28 @@ class DashboardPage(QObject):
 
         return True
 
-    @asyncSlot()
-    async def _on_chat_change(self):
-        prev_chat: str = ""
-        text_area = self.ui.chatPage_textArea
+    async def _change_contact(self, username: str):
+        content_area = self.ui.contentScrollAreaWidget
 
-        while self._running:
-            await asyncio.sleep(0)
+        if username == self.current_chat:
+            return  # current chat is the same
 
-            if not self.current_chat:
-                continue
+        self.current_chat: str = username
+        message_list: list[tuple[str, str, str]] = self.messages[username]
 
-            if prev_chat == self.current_chat:
-                continue  # current chat is the same
+        self.ui.chatPage_recipientName.setText(username)
+        content_area.clear_messages()
 
-            prev_chat: str = self.current_chat
-            message_list: list[tuple[str, str, str]] = self.messages[prev_chat]
+        for chat_tuple in message_list:
+            current_name: str = chat_tuple[0]
+            chat_text: str = chat_tuple[1]
 
-            self.ui.chatPage_recipientName.setText(prev_chat)
-            text_area.clear()
+            send_date: str = chat_tuple[2]
+            content_area.add_message(current_name, chat_text, send_date)
 
-            for chat_tuple in message_list:
-                current_name: str = chat_tuple[0]
-                chat_text: str = chat_tuple[1]
-
-                text_area.add_message(current_name, chat_text)
+        await asyncio.sleep(0.05)
+        scroll_bar = self.ui.chatPage_contentScrollArea.verticalScrollBar()
+        scroll_bar.setValue(scroll_bar.maximum())
 
     def initUI(self):
         def switch_theme():
@@ -330,10 +408,45 @@ class DashboardPage(QObject):
         # self.ui.themeSlider.valueChanged.connect(switch_theme)
         # self.ui.themeSlider.setCursor(Qt.PointingHandCursor)
 
-        self.ui.mainStackedWidget.setCurrentIndex(1)
+        self.ui.mainStackedWidget.setCurrentIndex(2)
+        self.ui.chatPage_composeMessageButton.clicked.connect(self.dialog_ComposeMessage.show)
 
         # self.ui.chatPage_menuButton.clicked.connect(self.dialog_ChatDashboardMenu.show)
         self.ui.chatPage_sendButton.clicked.connect(self.send_chat_message)
+
+        self.dialog_ComposeMessage.accepted.connect(self.add_new_contact)
+
+    @asyncSlot(str, str)
+    async def add_new_contact(self, name: str, message: str):
+        user_exists: tuple | bool = await self.chat_client.check_user_exists(name)
+        if isinstance(user_exists, tuple):
+            make_msgbox(
+                "Could not compose new message",
+                f"Failed due to error: {str(user_exists[1])}",
+                icon=QMessageBox.Icon.Critical
+            )
+            return
+
+        if not user_exists:
+            make_msgbox(
+                "Could not compose new message",
+                "User does not exist",
+                icon=QMessageBox.Icon.Warning
+            )
+            return
+
+        self.ui.usersScrollAreaWidget.add_user(name)
+        message_id: str = str(uuid.uuid4())
+        data: dict = {
+            "recipient": name,
+            "data": message,
+            "id": message_id
+        }
+
+        self.messages[name] = []
+        self.uncompleted_messages[message_id] = message
+
+        await self.ws_client.send_message("message.send", data)
 
     @asyncSlot()
     async def send_chat_message(self):
@@ -363,33 +476,35 @@ class WebSocketCallbacks:
         self.ui: Ui_MainWindow = parent.ui
 
         self.ws_client: WSClient = parent.ws_client
-        self.text_area = parent.ui.chatPage_textArea
+        self.content_area = parent.ui.contentScrollAreaWidget
 
     async def message_received(self, data: dict):
         sender: str = data.get('sender')
         message: str = data.get('data')
 
         timestamp: str = data.get('timestamp')
-        if sender not in self.messages:
+        if sender not in self.parent.messages:
             self.parent.messages[sender] = []
 
         self.parent.messages[sender].append([sender, message, timestamp])
-        if not self.current_chat:
+        if not self.parent.current_chat:
             return
 
-        self.text_area.add_message(sender, message, timestamp)
+        self.content_area.add_message(sender, message, timestamp)
 
     async def message_completed(self, data: dict):
         message_id: str = data.get('id')
         recipient: str = data.get('recipient')
+        timestamp: str = data.get('timestamp')
 
         stored_msg: str = self.parent.uncompleted_messages[message_id]
-        created_msg: list = [recipient, stored_msg]
+        created_msg: list = [recipient, stored_msg, timestamp]
 
         self.parent.messages[recipient].append(created_msg)
         del self.parent.uncompleted_messages[message_id]
 
-        self.text_area.add_message(self.parent.username, stored_msg)
+        if self.parent.current_chat == recipient:
+            self.content_area.add_message(self.parent.username, stored_msg, timestamp)
 
     async def socket_closed(self, data: dict):
         delay_seconds: int = 4

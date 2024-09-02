@@ -127,9 +127,6 @@
             <property name="text">
              <string/>
             </property>
-            <property name="maxLength">
-             <number>20</number>
-            </property>
             <property name="alignment">
              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignVCenter</set>
             </property>
@@ -160,6 +157,107 @@
         </item>
        </layout>
       </widget>
+      <widget class="QWidget" name="savedLoginsPage">
+       <layout class="QVBoxLayout" name="verticalLayout_2">
+        <item>
+         <widget class="QWidget" name="savedLogins_widget" native="true">
+          <widget class="QWidget" name="widget" native="true">
+           <property name="geometry">
+            <rect>
+             <x>620</x>
+             <y>250</y>
+             <width>120</width>
+             <height>80</height>
+            </rect>
+           </property>
+          </widget>
+          <widget class="QFrame" name="savedLogins_frame">
+           <property name="geometry">
+            <rect>
+             <x>470</x>
+             <y>100</y>
+             <width>381</width>
+             <height>441</height>
+            </rect>
+           </property>
+           <property name="frameShape">
+            <enum>QFrame::Shape::StyledPanel</enum>
+           </property>
+           <property name="frameShadow">
+            <enum>QFrame::Shadow::Raised</enum>
+           </property>
+           <widget class="QLabel" name="savedLogins_label">
+            <property name="geometry">
+             <rect>
+              <x>20</x>
+              <y>10</y>
+              <width>341</width>
+              <height>51</height>
+             </rect>
+            </property>
+            <property name="font">
+             <font>
+              <family>Ubuntu</family>
+              <pointsize>16</pointsize>
+              <bold>false</bold>
+             </font>
+            </property>
+            <property name="text">
+             <string>Choose a saved login below:</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignmentFlag::AlignCenter</set>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+           <widget class="QPushButton" name="savedLogins_loginButton">
+            <property name="geometry">
+             <rect>
+              <x>20</x>
+              <y>380</y>
+              <width>340</width>
+              <height>50</height>
+             </rect>
+            </property>
+            <property name="font">
+             <font>
+              <pointsize>14</pointsize>
+             </font>
+            </property>
+            <property name="text">
+             <string>Use this login</string>
+            </property>
+           </widget>
+           <widget class="QScrollArea" name="savedLogins_scrollArea">
+            <property name="geometry">
+             <rect>
+              <x>20</x>
+              <y>60</y>
+              <width>340</width>
+              <height>300</height>
+             </rect>
+            </property>
+            <property name="widgetResizable">
+             <bool>true</bool>
+            </property>
+            <widget class="QWidget" name="savedLoginsScrollAreaWidget">
+             <property name="geometry">
+              <rect>
+               <x>0</x>
+               <y>0</y>
+               <width>338</width>
+               <height>298</height>
+              </rect>
+             </property>
+            </widget>
+           </widget>
+          </widget>
+         </widget>
+        </item>
+       </layout>
+      </widget>
       <widget class="QWidget" name="chatPage">
        <layout class="QGridLayout" name="gridLayout">
         <item row="0" column="0">
@@ -179,19 +277,6 @@
            <property name="frameShadow">
             <enum>QFrame::Shadow::Raised</enum>
            </property>
-           <widget class="QTextBrowser" name="chatPage_textArea">
-            <property name="geometry">
-             <rect>
-              <x>10</x>
-              <y>70</y>
-              <width>1030</width>
-              <height>500</height>
-             </rect>
-            </property>
-            <property name="placeholderText">
-             <string>Messages will go here...</string>
-            </property>
-           </widget>
            <widget class="QFrame" name="chatPage_recipientFrame">
             <property name="geometry">
              <rect>
@@ -223,6 +308,29 @@
              </property>
              <property name="text">
               <string>{recipient username}</string>
+             </property>
+            </widget>
+           </widget>
+           <widget class="QScrollArea" name="chatPage_contentScrollArea">
+            <property name="geometry">
+             <rect>
+              <x>10</x>
+              <y>70</y>
+              <width>1031</width>
+              <height>501</height>
+             </rect>
+            </property>
+            <property name="widgetResizable">
+             <bool>true</bool>
+            </property>
+            <widget class="QWidget" name="contentScrollAreaWidget">
+             <property name="geometry">
+              <rect>
+               <x>0</x>
+               <y>0</y>
+               <width>1029</width>
+               <height>499</height>
+              </rect>
              </property>
             </widget>
            </widget>
@@ -324,9 +432,9 @@
            <property name="geometry">
             <rect>
              <x>10</x>
-             <y>80</y>
+             <y>130</y>
              <width>250</width>
-             <height>570</height>
+             <height>520</height>
             </rect>
            </property>
            <property name="horizontalScrollBarPolicy">
@@ -341,8 +449,37 @@
               <x>0</x>
               <y>0</y>
               <width>248</width>
-              <height>568</height>
+              <height>518</height>
              </rect>
+            </property>
+           </widget>
+          </widget>
+          <widget class="QFrame" name="chatPage_composeMessageFrame">
+           <property name="geometry">
+            <rect>
+             <x>10</x>
+             <y>80</y>
+             <width>250</width>
+             <height>40</height>
+            </rect>
+           </property>
+           <property name="frameShape">
+            <enum>QFrame::Shape::StyledPanel</enum>
+           </property>
+           <property name="frameShadow">
+            <enum>QFrame::Shadow::Raised</enum>
+           </property>
+           <widget class="QPushButton" name="chatPage_composeMessageButton">
+            <property name="geometry">
+             <rect>
+              <x>10</x>
+              <y>10</y>
+              <width>230</width>
+              <height>23</height>
+             </rect>
+            </property>
+            <property name="text">
+             <string>Compose new message</string>
             </property>
            </widget>
           </widget>
@@ -356,22 +493,5 @@
   </widget>
  </widget>
  <resources/>
- <connections>
-  <connection>
-   <sender>chatPage_sendButton</sender>
-   <signal>clicked()</signal>
-   <receiver>chatPage_messageInput</receiver>
-   <slot>clear()</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>1277</x>
-     <y>640</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>1100</x>
-     <y>642</y>
-    </hint>
-   </hints>
-  </connection>
- </connections>
+ <connections/>
 </ui>
