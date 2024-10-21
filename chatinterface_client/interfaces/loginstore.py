@@ -177,6 +177,6 @@ class KeyringManager:
             key_data: list[tuple[str, str]] | None = cursor.fetchall()
 
             if not key_data:
-                return "NO_USERS"
+                return None
         
         return key_data

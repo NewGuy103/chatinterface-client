@@ -208,6 +208,41 @@ class SavedLoginsScrollAreaWidget(QtWidgets.QWidget):
         return frame
 
 
+class ComposeMessageDialog(QtWidgets.QDialog):
+    accepted: QtCore.Signal = QtCore.Signal(str, str)
+
+    def __init__(
+            self, parent: QtWidgets.QWidget | None = None, 
+            f: QtCore.Qt.WindowType = QtCore.Qt.WindowType.Dialog,
+    ) -> None:
+        super().__init__(parent, f)
+        self.ui: Ui_ComposeMessageDialog = Ui_ComposeMessageDialog()
+
+        self.ui.setupUi(self)
+    
+    def accept(self):
+        name: str = self.ui.nameInput.text()
+        message: str = self.ui.messageInput.toPlainText()
+
+        if not name or not message:
+            icon = QtWidgets.QMessageBox.Icon.Warning
+            
+            msgbox: QtWidgets.QMessageBox = QtWidgets.QMessageBox()
+            msgbox.setWindowTitle('chatInterface')
+
+            msgbox.setText("Missing name or message input")
+            msgbox.setInformativeText("Enter the required fields and try again")
+
+            msgbox.setIcon(icon)
+            msgbox.exec()
+
+            msgbox.deleteLater()
+            return
+
+        self.accepted.emit(name, message)
+        super().accept()
+
+
 # -*- coding: utf-8 -*-
 
 ################################################################################

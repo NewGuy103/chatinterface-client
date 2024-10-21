@@ -5,18 +5,19 @@ import asyncio
 import uuid
 import httpx
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QMessageBox,
-    QDialog, QWidget
+    QApplication, QMainWindow, QMessageBox
 )
 from qasync import QEventLoop, asyncSlot
 from urllib.parse import urlparse
+from datetime import datetime
 
 from .interfaces.route_clients import TokenRouteClient, ChatsRouteClient
 from .interfaces.ws import WSClient
 from .interfaces.loginstore import KeyringManager
-from .cui import Ui_MainWindow, Ui_ComposeMessageDialog
+from .cui import Ui_MainWindow, ComposeMessageDialog
+from .config import RuntimeState
 
 
 def make_msgbox(text: str, extra_text: str = '', icon: QMessageBox.Icon | None = None) -> None:
@@ -50,34 +51,6 @@ class MainWindow(QMainWindow):
         self.loginPage: LoginPage = LoginPage(self)
 
 
-class ComposeMessageDialog(QDialog):
-    accepted: Signal = Signal(str, str)
-
-    def __init__(
-            self, parent: QWidget | None = None, 
-            f: Qt.WindowType = Qt.WindowType.Dialog
-    ) -> None:
-        super().__init__(parent, f)
-        self.ui: Ui_ComposeMessageDialog = Ui_ComposeMessageDialog()
-
-        self.ui.setupUi(self)
-    
-    def accept(self):
-        name: str = self.ui.nameInput.text()
-        message: str = self.ui.messageInput.toPlainText()
-
-        if not name or not message:
-            make_msgbox(
-                "Missing name or message input",
-                "Enter the required fields and try again",
-                icon=QMessageBox.Icon.Warning
-            )
-            return
-
-        self.accepted.emit(name, message)
-        super().accept()
-
-
 class LoginPage(QObject):
     def __init__(self, parent: MainWindow) -> None:
         super().__init__()
@@ -91,6 +64,9 @@ class LoginPage(QObject):
     async def initCore(self):
         await self.keyring_manager.setup()
         users: list | str = await self.keyring_manager.show_users()
+
+        if users is None:
+            return
 
         if len(users) == 1:
             first_user: tuple = users[0]
@@ -259,21 +235,17 @@ class DashboardPage(QObject):
             timeout=20, headers=headers
         )
 
+        self.state: RuntimeState = RuntimeState('', '', {}, {})
         self.__token: str = token
         self._running: bool = True
-        self.username: str = ''
 
-        self.current_chat: str = ''
-        self.messages: dict[str, list] = {}
-
-        self.uncompleted_messages: dict = {}
         self.chat_client: ChatsRouteClient = ChatsRouteClient(http_host, http_client)
 
         self.token_client: TokenRouteClient = TokenRouteClient(http_host, http_client)
         self.ws_client: WSClient = WSClient(ws_host)
 
         self.ui: Ui_MainWindow = ui
-        self.callbacks: WebSocketCallbacks = WebSocketCallbacks(self)
+        self.callbacks: WebSocketCallbacks = WebSocketCallbacks(self, self.state)
 
         self.dialog_ComposeMessage: ComposeMessageDialog = ComposeMessageDialog(
             self.ui.chatPage_widget, Qt.WindowType.Dialog
@@ -294,7 +266,7 @@ class DashboardPage(QObject):
         if not await self.initClientList():
             return
 
-        self.ui.chatPage_usernameLabel.setText(self.username)
+        self.ui.chatPage_usernameLabel.setText(self.state.username)
 
     async def initClientList(self):
         loop = asyncio.get_event_loop()
@@ -309,7 +281,7 @@ class DashboardPage(QObject):
             )
             return
 
-        self.username: str = session_info['username']
+        self.state.username = session_info['username']
         recipients: set[str] | tuple = await self.chat_client.get_contacts()
 
         if isinstance(recipients, tuple):
@@ -334,7 +306,7 @@ class DashboardPage(QObject):
             frame = user_widget.add_user(name)
             frame.clicked.connect(lambda name=name: loop.create_task(self._change_contact(name)))
 
-            self.messages[name] = list(reversed(messages))  # most recent will show up first
+            self.state.messages[name] = list(reversed(messages))  # most recent will show up first
             complete_fetches.add(name)
 
         if failed_fetches:
@@ -357,11 +329,11 @@ class DashboardPage(QObject):
     async def _change_contact(self, username: str):
         content_area = self.ui.contentScrollAreaWidget
 
-        if username == self.current_chat:
+        if username == self.state.current_chat:
             return  # current chat is the same
 
-        self.current_chat: str = username
-        message_list: list[tuple[str, str, str]] = self.messages[username]
+        self.state.current_chat = username
+        message_list: list[tuple[str, str, str]] = self.state.messages[username]
 
         self.ui.chatPage_recipientName.setText(username)
         content_area.clear_messages()
@@ -418,6 +390,7 @@ class DashboardPage(QObject):
 
     @asyncSlot(str, str)
     async def add_new_contact(self, name: str, message: str):
+        loop = asyncio.get_event_loop()
         user_exists: tuple | bool = await self.chat_client.check_user_exists(name)
         if isinstance(user_exists, tuple):
             make_msgbox(
@@ -435,22 +408,26 @@ class DashboardPage(QObject):
             )
             return
 
-        self.ui.usersScrollAreaWidget.add_user(name)
-        message_id: str = str(uuid.uuid4())
-        data: dict = {
-            "recipient": name,
-            "data": message,
-            "id": message_id
-        }
+        compose_result: tuple | int = await self.chat_client.compose_new_message(name, message)
+        if isinstance(compose_result, tuple):
+            make_msgbox(
+                "Could not compose new message",
+                f"Failed due to error: {str(compose_result[1])}",
+                icon=QMessageBox.Icon.Critical
+            )
+            return
 
-        self.messages[name] = []
-        self.uncompleted_messages[message_id] = message
+        frame = self.ui.usersScrollAreaWidget.add_user(name)
+        frame.clicked.connect(lambda name=name: loop.create_task(self._change_contact(name)))
 
-        await self.ws_client.send_message("message.send", data)
+        current_time: datetime = datetime.now()
+        str_date: str = datetime.strftime(current_time, "%Y-%m-%d %H:%M:%S")
+
+        self.state.messages[name] = [[name, message, str_date]]
 
     @asyncSlot()
     async def send_chat_message(self):
-        if not self.current_chat:
+        if not self.state.current_chat:
             return
 
         message: str = self.ui.chatPage_messageInput.toPlainText()
@@ -459,19 +436,20 @@ class DashboardPage(QObject):
 
         message_id: str = str(uuid.uuid4())
         data: dict = {
-            "recipient": self.current_chat,
+            "recipient": self.state.current_chat,
             "data": message,
             "id": message_id
         }
 
-        self.uncompleted_messages[message_id] = message
+        self.state.uncompleted_messages[message_id] = message
         await self.ws_client.send_message("message.send", data)
 
         self.ui.chatPage_messageInput.clear()
 
 
 class WebSocketCallbacks:
-    def __init__(self, parent: DashboardPage) -> None:
+    def __init__(self, parent: DashboardPage, state: RuntimeState) -> None:
+        self.state: RuntimeState = state
         self.parent: DashboardPage = parent
         self.ui: Ui_MainWindow = parent.ui
 
@@ -483,11 +461,11 @@ class WebSocketCallbacks:
         message: str = data.get('data')
 
         timestamp: str = data.get('timestamp')
-        if sender not in self.parent.messages:
-            self.parent.messages[sender] = []
+        if sender not in self.state.messages:
+            self.state.messages[sender] = []
 
-        self.parent.messages[sender].append([sender, message, timestamp])
-        if not self.parent.current_chat:
+        self.state.messages[sender].append([sender, message, timestamp])
+        if not self.state.current_chat:
             return
 
         self.content_area.add_message(sender, message, timestamp)
@@ -497,14 +475,14 @@ class WebSocketCallbacks:
         recipient: str = data.get('recipient')
         timestamp: str = data.get('timestamp')
 
-        stored_msg: str = self.parent.uncompleted_messages[message_id]
+        stored_msg: str = self.state.uncompleted_messages[message_id]
         created_msg: list = [recipient, stored_msg, timestamp]
 
-        self.parent.messages[recipient].append(created_msg)
-        del self.parent.uncompleted_messages[message_id]
+        self.state.messages[recipient].append(created_msg)
+        del self.state.uncompleted_messages[message_id]
 
-        if self.parent.current_chat == recipient:
-            self.content_area.add_message(self.parent.username, stored_msg, timestamp)
+        if self.state.current_chat == recipient:
+            self.content_area.add_message(self.state.username, stored_msg, timestamp)
 
     async def socket_closed(self, data: dict):
         delay_seconds: int = 4
@@ -513,9 +491,9 @@ class WebSocketCallbacks:
             if reconnect_result[0] == 0:
                 await self.parent.initClientList()
                 return
-            
+
             await asyncio.sleep(delay_seconds * (2**attempt))
-        
+
         make_msgbox(
             "Reconnect failed",
             "Failed to reconnect to server after 4 times",

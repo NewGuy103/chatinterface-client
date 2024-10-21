@@ -159,7 +159,7 @@ class ChatsRouteClient:
 
         return messages
 
-    async def check_user_exists(self, username: str, endpoint: str = '/chats/user-exists') -> tuple | bool:
+    async def check_user_exists(self, username: str, endpoint: str = '/chats/user_exists') -> tuple | bool:
         if not isinstance(username, str):
             raise TypeError("username is not a string")
         
@@ -168,3 +168,25 @@ class ChatsRouteClient:
 
         user_exists: tuple | bool = await make_request(self.client, "GET", url, params=params)
         return user_exists
+
+    async def compose_new_message(
+        self, recipient: str, message: str, 
+        endpoint: str = '/chats/compose_message'
+    ) -> tuple | bool:
+        if not isinstance(recipient, str):
+            raise TypeError("recipient is not a string")
+
+        if not isinstance(message, str):
+            raise TypeError("message is not a string")
+
+        if len(recipient) > 20:
+            raise ValueError("recipient name is too long")
+
+        url: str = f"{self.host}{endpoint}"
+        data: dict = {
+            'recipient': recipient,
+            'message_data': message
+        }
+
+        message_sent: tuple | bool = await make_request(self.client, "POST", url, json=data)
+        return message_sent

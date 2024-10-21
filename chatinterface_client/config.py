@@ -2,9 +2,18 @@ import logging
 import os
 
 from platformdirs import PlatformDirs
+from dataclasses import dataclass
 from .version import __version__
 
 dirs = PlatformDirs("chatinterface-client", "newguy103", version=__version__)
+
+
+@dataclass
+class RuntimeState:
+    username: str
+    current_chat: str
+    messages: dict[str, list]
+    uncompleted_messages: dict[str, list]
 
 
 def simple_log_setup(
