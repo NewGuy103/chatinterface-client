@@ -2,6 +2,10 @@
 
 Simple client interface with PySide6 to interact with server.
 
+## NOTE
+
+This project is currently deprecated unless I choose to revive it. There is a web UI being created for the server app, and this has no use currently.
+
 ## Requirements
 
 Python 3.10+
